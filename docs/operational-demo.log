@@ -1,0 +1,287 @@
+=== 0. Clean slate ===
+$ docker compose down -v
+ Container 554project-app-1  Stopping
+ Container 554project-app-1  Stopped
+ Container 554project-app-1  Removing
+ Container 554project-app-1  Removed
+ Container 554project-redis-1  Stopping
+ Container 554project-redis-1  Stopped
+ Container 554project-redis-1  Removing
+ Container 554project-redis-1  Removed
+ Volume 554project_redis_data  Removing
+ Network 554project_app-net  Removing
+ Volume 554project_redis_data  Removed
+ Network 554project_app-net  Removed
+
+=== 1. Build the application image ===
+$ docker compose build
+Compose can now delegate builds to bake for better performance.
+ To do so, set COMPOSE_BAKE=true.
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [app internal] load build definition from Dockerfile
+#1 transferring dockerfile: 864B done
+#1 DONE 0.0s
+
+#2 [app] resolve image config for docker-image://docker.io/docker/dockerfile:1
+#2 DONE 0.9s
+
+#3 [app] docker-image://docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+#3 resolve docker.io/docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32 done
+#3 CACHED
+
+#4 [app internal] load metadata for docker.io/library/node:20.17.0-alpine3.20
+#4 DONE 0.3s
+
+#5 [app internal] load .dockerignore
+#5 transferring context: 177B done
+#5 DONE 0.0s
+
+#6 [app 1/6] FROM docker.io/library/node:20.17.0-alpine3.20@sha256:2d07db07a2df6830718ae2a47db6fedce6745f5bcd174c398f2acdda90a11c03
+#6 resolve docker.io/library/node:20.17.0-alpine3.20@sha256:2d07db07a2df6830718ae2a47db6fedce6745f5bcd174c398f2acdda90a11c03 done
+#6 DONE 0.0s
+
+#7 [app internal] load build context
+#7 transferring context: 1.12kB done
+#7 DONE 0.0s
+
+#8 [app 2/6] WORKDIR /usr/src/app
+#8 CACHED
+
+#9 [app 3/6] COPY package.json package-lock.json ./
+#9 CACHED
+
+#10 [app 4/6] RUN npm ci --omit=dev && npm cache clean --force
+#10 CACHED
+
+#11 [app 5/6] COPY src ./src
+#11 DONE 0.0s
+
+#12 [app 6/6] RUN addgroup -S appgroup && adduser -S appuser -G appgroup     && chown -R appuser:appgroup /usr/src/app
+#12 DONE 1.5s
+
+#13 [app] exporting to image
+#13 exporting layers 0.1s done
+#13 exporting manifest sha256:0845f452817a2e712effb10231885983cf4731de99ac921c6098fc1994c5abf8
+#13 exporting manifest sha256:0845f452817a2e712effb10231885983cf4731de99ac921c6098fc1994c5abf8 done
+#13 exporting config sha256:755facff5d0998f85699cda4a826044f4e1e2496238787c359a85ef76c06c35d done
+#13 exporting attestation manifest sha256:db80b3f262a564c20d49001652c97e407a171ebc34133d44ddb8e2f20d45fe67 done
+#13 exporting manifest list sha256:6ae5095a10582c4af3ac02145dca4cd635a911f4a89fbddf1d29d971a5aa9c3f done
+#13 naming to docker.io/library/lbs-to-kg-app:1.0.0 done
+#13 unpacking to docker.io/library/lbs-to-kg-app:1.0.0 0.1s done
+#13 DONE 0.3s
+
+#14 [app] resolving provenance for metadata file
+#14 DONE 0.0s
+ app  Built
+
+=== 2. Start the complete system with one Compose command ===
+$ docker compose up -d
+ Network 554project_app-net  Creating
+ Network 554project_app-net  Created
+ Volume "554project_redis_data"  Creating
+ Volume "554project_redis_data"  Created
+ Container 554project-redis-1  Creating
+ Container 554project-redis-1  Created
+ Container 554project-app-1  Creating
+ Container 554project-app-1  Created
+ Container 554project-redis-1  Starting
+ Container 554project-redis-1  Started
+ Container 554project-redis-1  Waiting
+ Container 554project-redis-1  Healthy
+ Container 554project-app-1  Starting
+ Container 554project-app-1  Started
+
+$ docker compose ps
+NAME                 IMAGE                    COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+554project-app-1     lbs-to-kg-app:1.0.0      "docker-entrypoint.s…"   app       14 seconds ago   Up 8 seconds (healthy)    0.0.0.0:3000->3000/tcp
+554project-redis-1   redis:7.4.1-alpine3.20   "docker-entrypoint.s…"   redis     14 seconds ago   Up 13 seconds (healthy)   6379/tcp
+
+=== 3. Verify the application health endpoint ===
+$ curl -s -w '
+HTTP %{http_code}
+' http://localhost:3000/health
+{"status":"ok"}
+HTTP 200
+
+=== baseline stats ===
+$ curl -s http://localhost:3000/stats
+{"conversions":0}
+=== 4. Perform at least two successful conversions ===
+$ curl -s "http://localhost:3000/convert?lbs=150"
+{"lbs":150,"kg":68.039,"formula":"kg = lbs * 0.45359237"}
+$ curl -s "http://localhost:3000/convert?lbs=0.1"
+{"lbs":0.1,"kg":0.045,"formula":"kg = lbs * 0.45359237"}
+=== also exercise error cases ===
+$ curl -s -w '
+HTTP %{http_code}
+' "http://localhost:3000/convert?lbs=0"
+{"lbs":0,"kg":0,"formula":"kg = lbs * 0.45359237"}
+HTTP 200
+
+$ curl -s -w '
+HTTP %{http_code}
+' "http://localhost:3000/convert"
+{"error":"Missing required query parameter: lbs"}
+HTTP 400
+
+$ curl -s -w '
+HTTP %{http_code}
+' "http://localhost:3000/convert?lbs=abc"
+{"error":"lbs must be a number"}
+HTTP 400
+
+$ curl -s -w '
+HTTP %{http_code}
+' "http://localhost:3000/convert?lbs=-5"
+{"error":"lbs must be a finite, non-negative number"}
+HTTP 422
+
+=== 5. Verify /stats reports the expected count ===
+$ curl -s http://localhost:3000/stats
+{"conversions":3}
+=== 6. Automated test run (npm test) ===
+$ cd app && BASE_URL=http://localhost:3000 npm test; cd ..
+
+> lbs-to-kg-service@1.0.0 test
+> node test/run-tests.js
+
+Running tests against http://localhost:3000
+
+[PASS] /health returns 200 - status=200
+[PASS] /health returns status ok - {"status":"ok"}
+[PASS] /stats reachable before conversions - status=200
+[PASS] /convert?lbs=0 returns 200 - status=200
+[PASS] /convert?lbs=0 kg is 0 - {"lbs":0,"kg":0,"formula":"kg = lbs * 0.45359237"}
+[PASS] /convert?lbs=150 returns 200 - status=200
+[PASS] /convert?lbs=150 kg is 68.039 - {"lbs":150,"kg":68.039,"formula":"kg = lbs * 0.45359237"}
+[PASS] /convert?lbs=0.1 returns 200 - status=200
+[PASS] /convert?lbs=0.1 kg is 0.045 - {"lbs":0.1,"kg":0.045,"formula":"kg = lbs * 0.45359237"}
+[PASS] /convert (missing lbs) returns 400 - status=400
+[PASS] /convert?lbs=abc returns 400 - status=400
+[PASS] /convert?lbs=-5 returns 422 - status=422
+[PASS] /stats returns 200 - status=200
+[PASS] /stats reflects only successful conversions (expected 6) - {"conversions":6}
+
+14 passed, 0 failed
+
+=== 7. Inspect application logs ===
+$ docker compose logs app --tail 30
+app-1  | [redis] connected to redis:6379
+app-1  | [server] lbs-to-kg service listening on port 3000
+
+$ docker compose logs redis --tail 10
+redis-1  | 1:C 26 Sep 2026 00:16:29.568 * oO0OoO0OoO0Oo Redis is starting oO0OoO0OoO0Oo
+redis-1  | 1:C 26 Sep 2026 00:16:29.568 * Redis version=7.4.1, bits=64, commit=00000000, modified=0, pid=1, just started
+redis-1  | 1:C 26 Sep 2026 00:16:29.568 * Configuration loaded
+redis-1  | 1:M 26 Sep 2026 00:16:29.568 * monotonic clock: POSIX clock_gettime
+redis-1  | 1:M 26 Sep 2026 00:16:29.569 * Running mode=standalone, port=6379.
+redis-1  | 1:M 26 Sep 2026 00:16:29.569 * Server initialized
+redis-1  | 1:M 26 Sep 2026 00:16:29.570 * Creating AOF base file appendonly.aof.1.base.rdb on server start
+redis-1  | 1:M 26 Sep 2026 00:16:29.572 * Creating AOF incr file appendonly.aof.1.incr.aof on server start
+redis-1  | 1:M 26 Sep 2026 00:16:29.572 * Ready to accept connections tcp
+
+=== 8. Failure scenario: Redis becomes unreachable ===
+$ docker compose stop redis
+ Container 554project-redis-1  Stopping
+ Container 554project-redis-1  Stopped
+
+$ time curl -s -w "
+HTTP %{http_code}
+" --max-time 10 "http://localhost:3000/convert?lbs=10"
+{"error":"Storage unavailable, please retry"}
+HTTP 503
+curl -s -w '\nHTTP %{http_code}\n' --max-time 10   0.00s user 0.01s system 44% cpu 0.025 total
+
+=== app did not crash while redis was down ===
+$ docker compose ps app
+NAME               IMAGE                 COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+554project-app-1   lbs-to-kg-app:1.0.0   "docker-entrypoint.s…"   app       39 seconds ago   Up 33 seconds (healthy)   0.0.0.0:3000->3000/tcp
+
+=== restarting redis, confirming automatic reconnection ===
+$ docker compose start redis
+ Container 554project-redis-1  Starting
+ Container 554project-redis-1  Started
+
+$ docker compose logs app --tail 10
+app-1  | [redis] client error: getaddrinfo ENOTFOUND redis
+app-1  | [redis] reconnecting to redis:6379...
+app-1  | [redis] client error: getaddrinfo ENOTFOUND redis
+app-1  | [redis] reconnecting to redis:6379...
+app-1  | [redis] client error: getaddrinfo ENOTFOUND redis
+app-1  | [convert] failed to increment conversions counter: The client is offline
+app-1  | [redis] reconnecting to redis:6379...
+app-1  | [redis] client error: getaddrinfo ENOTFOUND redis
+app-1  | [redis] reconnecting to redis:6379...
+app-1  | [redis] connected to redis:6379
+
+$ curl -s -w '
+HTTP %{http_code}
+' "http://localhost:3000/convert?lbs=10"
+{"lbs":10,"kg":4.536,"formula":"kg = lbs * 0.45359237"}
+HTTP 200
+
+=== 9. Verify non-root runtime user ===
+$ docker compose exec app whoami
+appuser
+
+=== 10. Stats after the failure-scenario conversion ===
+$ curl -s http://localhost:3000/stats
+{"conversions":7}
+=== 11. Stop and remove the application containers (volume kept) ===
+$ docker compose down
+ Container 554project-app-1  Stopping
+ Container 554project-app-1  Stopped
+ Container 554project-app-1  Removing
+ Container 554project-app-1  Removed
+ Container 554project-redis-1  Stopping
+ Container 554project-redis-1  Stopped
+ Container 554project-redis-1  Removing
+ Container 554project-redis-1  Removed
+ Network 554project_app-net  Removing
+ Network 554project_app-net  Removed
+
+$ docker volume ls | grep redis_data
+local     554project_redis_data
+
+=== 12. Recreate the system ===
+$ docker compose up -d
+ Network 554project_app-net  Creating
+ Network 554project_app-net  Created
+ Container 554project-redis-1  Creating
+ Container 554project-redis-1  Created
+ Container 554project-app-1  Creating
+ Container 554project-app-1  Created
+ Container 554project-redis-1  Starting
+ Container 554project-redis-1  Started
+ Container 554project-redis-1  Waiting
+ Container 554project-redis-1  Healthy
+ Container 554project-app-1  Starting
+ Container 554project-app-1  Started
+
+$ docker compose ps
+NAME                 IMAGE                    COMMAND                  SERVICE   CREATED          STATUS                    PORTS
+554project-app-1     lbs-to-kg-app:1.0.0      "docker-entrypoint.s…"   app       14 seconds ago   Up 8 seconds (healthy)    0.0.0.0:3000->3000/tcp
+554project-redis-1   redis:7.4.1-alpine3.20   "docker-entrypoint.s…"   redis     14 seconds ago   Up 13 seconds (healthy)   6379/tcp
+
+=== 13. Verify /stats still reports the previous count ===
+$ curl -s http://localhost:3000/stats
+{"conversions":7}
+=== 14. Cleanly remove all project resources, including the named volume ===
+$ docker compose down -v
+ Container 554project-app-1  Stopping
+ Container 554project-app-1  Stopped
+ Container 554project-app-1  Removing
+ Container 554project-app-1  Removed
+ Container 554project-redis-1  Stopping
+ Container 554project-redis-1  Stopped
+ Container 554project-redis-1  Removing
+ Container 554project-redis-1  Removed
+ Network 554project_app-net  Removing
+ Volume 554project_redis_data  Removing
+ Volume 554project_redis_data  Removed
+ Network 554project_app-net  Removed
+
+$ docker volume ls | grep redis_data || echo 'redis_data volume no longer exists'
+redis_data volume no longer exists
+

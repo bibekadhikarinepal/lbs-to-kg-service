@@ -1,0 +1,46 @@
+services:
+  app:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: lbs-to-kg-app:1.0.0
+    environment:
+      PORT: "3000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    networks:
+      - app-net
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/health').then(r=>{if(r.status!==200)process.exit(1);process.exit(0)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  redis:
+    image: redis:7.4.1-alpine3.20
+    command: ["redis-server", "--save", "60", "1", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+networks:
+  app-net:
+    driver: bridge
+
+volumes:
+  redis_data:
