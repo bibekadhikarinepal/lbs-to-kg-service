@@ -2,14 +2,36 @@
 
 A small multi-container application that converts pounds to kilograms over a
 REST API. The application is packaged as an OCI-compatible container image
-and stores a persistent count of successful conversions in Redis. The whole
-system is started, stopped, and recreated with Docker (or Podman) Compose.
+and stores a persistent count of successful conversions in Redis.
+
+## Clone and Run
+
+```bash
+git clone https://github.com/bibekadhikarinepal/lbs-to-kg-service.git
+cd lbs-to-kg-service
+docker compose up -d --build
+```
+
+| Command | What it does |
+|---|---|
+| `git clone https://github.com/bibekadhikarinepal/lbs-to-kg-service.git` | Downloads the repository to a new local folder |
+| `cd lbs-to-kg-service` | Moves into the repository root, where `compose.yaml` lives |
+| `docker compose up -d --build` | Builds the `app` image and starts both services (`app`, `redis`) in the background |
+| `docker compose ps` | Shows both containers and their health status |
+| `curl http://localhost:3000/health` | Checks the app is up and responding |
+| `curl "http://localhost:3000/convert?lbs=150"` | Converts 150 lbs to kg and increments the Redis counter |
+| `curl http://localhost:3000/stats` | Returns the persistent count of successful conversions |
+| `docker compose logs -f app` | Follows the application's logs |
+| `docker compose down` | Stops and removes the containers, keeping the `redis_data` volume |
+| `docker compose down -v` | Stops and removes the containers **and** deletes the `redis_data` volume |
+
+See the sections below for full detail on each step, testing, logs, and cleanup.
 
 ## Architecture
 
 | Service | Role | Host port |
 |---|---|---|
-| `app` | Node.js/Express REST API (`/health`, `/convert`, `/stats`) | `3000` (configurable via `HOST_PORT`) |
+| `app` | Node.js/Express REST API (`/health`, `/convert`, `/stats`) | `3000`   |
 | `redis` | Stores the `conversions` counter, persisted to a named volume | not published — reachable only on the private `app-net` network |
 
 The app locates Redis through the `REDIS_HOST`/`REDIS_PORT` environment
@@ -109,7 +131,7 @@ A full transcript of build → start → health check → conversions → stats 
 logs → `down` (volume kept) → recreate → verify persisted count → `down -v`
 cleanup is captured in [`docs/operational-demo.log`](docs/operational-demo.log).
 
-## Bug Fix: Requests Hung Instead of Failing Fast During a Redis Outage
+## Bug noticed and Fixed: Requests Hung Instead of Failing Fast During a Redis Outage
 
 While demonstrating the Redis-unreachable failure scenario (see Graduate
 Extension below), `GET /convert` was found to hang indefinitely — rather than
@@ -152,21 +174,17 @@ are meant to be disposable — recreated on every deploy, upgrade, or crash.
 A named volume (`redis_data`) decouples persistent state from the container's
 lifecycle, so `redis`'s container can be stopped, removed, upgraded to a new
 image tag, or rescheduled without losing the `conversions` counter. Deleting
-data becomes an explicit, separate action (`down -v`) instead of an accidental
+data becomes an explicit, separate action instead of an accidental
 side effect of removing a container.
 
 **Containers vs. a single VM — one benefit, one limitation.**
-- *Benefit:* the same `compose.yaml` and images run identically on a laptop,
-  CI runner, or cloud host — no manual installation of Node, Redis, or
-  matching-version system libraries on the VM, and no risk of one service's
-  dependencies clashing with the other's.
-- *Limitation:* an extra layer (the container runtime and its networking/
-  storage drivers) sits between the application and the host, which adds
-  operational overhead and a small amount of runtime resource overhead
-  compared to two processes installed and talking over `localhost` on a
-  single VM.
 
-### Graduate extension (CS 554)
+| | Summary | Why |
+|---|---|---|
+| **Benefit** | Runs identically everywhere | Same `compose.yaml` and images on a laptop, CI runner, or cloud host — no manual install of Node/Redis/matching system libraries, and no dependency clashes between services |
+| **Limitation** | Extra runtime overhead | The container runtime's networking/storage layer sits between app and host, adding operational and resource overhead vs. two processes talking over `localhost` on one VM |
+
+### Graduate extension
 
 **Restart policy.** Both services use `restart: unless-stopped`
 (`compose.yaml`). This restarts a container automatically after it exits due
@@ -189,16 +207,8 @@ and normal operation resumes with no code changes or restart of `app`
 required.
 
 **Compose vs. single-VM deployment — tradeoffs.**
-1. *Isolation & reproducibility vs. resource efficiency:* each service in
-   Compose gets its own filesystem, dependency set, and network namespace,
-   so upgrading Redis's version can never break the app's Node runtime (and
-   vice versa) — but two containers carry more overhead (separate base
-   layers, network bridge, health-check processes) than two bare processes
-   sharing one OS on a VM.
-2. *Operational simplicity vs. control:* Compose gives declarative,
-   one-command lifecycle management (`up`/`down`/`stop`) and consistent
-   networking/DNS across environments, whereas a hand-configured VM requires
-   manually installing, versioning, and networking each service (and
-   reproducing that setup on every new VM) — but the VM approach can be
-   simpler to reason about when only a single, static deployment target
-   exists and no reproducibility across environments is needed.
+
+| Tradeoff | Compose (containers) | Single VM |
+|---|---|---|
+| **Isolation & reproducibility** vs. **resource efficiency** | Each service has its own filesystem, dependencies, and network namespace — upgrading Redis can't break the app's Node runtime | Two bare processes share one OS with no isolation overhead, but dependencies can clash |
+| **Operational simplicity** vs. **control** | One-command lifecycle (`up`/`down`/`stop`) and consistent networking/DNS across environments | Simpler to reason about for a single static target, but each service must be manually installed, versioned, and networked — and re-done per VM |
